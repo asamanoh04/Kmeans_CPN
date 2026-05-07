@@ -1,9 +1,13 @@
-// ============================================================
-// K-MEANS PARALELO - 3D (OpenMP)
+// K-MEANS PARALELO - 3D con OpenMP
 // Computo Paralelo - ITAM 2026
-// Uso: ./kmeans_paralelo_3d <entrada.csv> <K> <salida.csv> <num_hilos>
-// Ejemplo: ./kmeans_paralelo_3d ../datos/100000_data_3d.csv 3 ../resultados/salida.csv 6
-// ============================================================
+//
+// Version paralela del K-means para datos en 3 dimensiones (x, y, z).
+// Identica en logica al paralelo 2D, solo que ahora cada punto
+// tiene una coordenada z adicional que hay que considerar en todo.
+//
+// Como se corre:
+// ./kmeans_paralelo_3d ../datos/100000_data_3d.csv 3 ../resultados/salida.csv 6
+//   archivo de entrada    K centroides    donde guardar    cuantos hilos usar
 
 #include <iostream>
 #include <fstream>
@@ -15,22 +19,20 @@
 #include <chrono>
 #include <omp.h>
 
-// ============================================================
-// ESTRUCTURAS
-// ============================================================
+// Un punto en 3D con sus tres coordenadas y su cluster asignado.
+// cluster empieza en -1 (sin asignar).
 struct Punto3D {
     double x, y, z;
     int cluster;
 };
 
+// Un centroide en 3D, solo necesita coordenadas.
 struct Centroide3D {
     double x, y, z;
 };
 
-// ============================================================
-// FUNCIÓN: Leer CSV
-// Formato esperado: x,y,z (sin encabezado)
-// ============================================================
+// Lee el CSV linea por linea esperando tres valores por fila: x, y, z.
+// Sin encabezado, directo los numeros desde la primera linea.
 std::vector<Punto3D> leerCSV(const std::string& archivo) {
     std::vector<Punto3D> puntos;
     std::ifstream f(archivo);
@@ -59,9 +61,8 @@ std::vector<Punto3D> leerCSV(const std::string& archivo) {
     return puntos;
 }
 
-// ============================================================
-// FUNCIÓN: Guardar CSV
-// ============================================================
+// Guarda los resultados en CSV con cuatro columnas: x, y, z, cluster.
+// Este archivo se puede abrir en Python para visualizar los clusters en 3D.
 void guardarCSV(const std::string& archivo, const std::vector<Punto3D>& puntos) {
     std::ofstream f(archivo);
 
@@ -78,9 +79,9 @@ void guardarCSV(const std::string& archivo, const std::vector<Punto3D>& puntos) 
     f.close();
 }
 
-// ============================================================
-// FUNCIÓN: Distancia euclidiana al cuadrado 3D
-// ============================================================
+// Distancia euclidiana al cuadrado en 3D.
+// Igual que en 2D pero ahora sumamos tambien la diferencia en z.
+// Sin raiz cuadrada porque solo comparamos distancias, no necesitamos el valor exacto.
 double distancia2(const Punto3D& p, const Centroide3D& c) {
     double dx = p.x - c.x;
     double dy = p.y - c.y;
@@ -88,9 +89,8 @@ double distancia2(const Punto3D& p, const Centroide3D& c) {
     return dx*dx + dy*dy + dz*dz;
 }
 
-// ============================================================
-// FUNCIÓN: Inicializar centroides
-// ============================================================
+// Elige K puntos al azar del dataset como centroides de arranque.
+// srand(42) fija la semilla para que el experimento sea reproducible.
 std::vector<Centroide3D> inicializarCentroides(const std::vector<Punto3D>& puntos, int K) {
     std::vector<Centroide3D> centroides(K);
     int n = puntos.size();
@@ -104,9 +104,10 @@ std::vector<Centroide3D> inicializarCentroides(const std::vector<Punto3D>& punto
     return centroides;
 }
 
-// ============================================================
-// FUNCIÓN PRINCIPAL: K-means PARALELO 3D con OpenMP
-// ============================================================
+// El algoritmo K-means en 3D con OpenMP.
+// Misma estrategia que el 2D: paralelizar la asignacion de puntos
+// y el recalculo de centroides con sumas locales por hilo.
+// Regresa cuantas iteraciones tomo converger.
 int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, int K, int max_iter = 100) {
     int n = puntos.size();
     int iter = 0;
@@ -116,9 +117,10 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
         cambio = false;
         iter++;
 
-        // ----------------------------------------
-        // PASO 1: Asignar puntos a centroides - PARALELIZADO
-        // ----------------------------------------
+        // PASO 1: cada punto busca el centroide mas cercano.
+        // Los hilos se reparten los puntos en bloques iguales (schedule static).
+        // reduction(||:cambio) detecta si algun punto cambio de cluster
+        // sin que los hilos se pisen entre si.
         #pragma omp parallel for schedule(static) shared(puntos, centroides) reduction(||:cambio)
         for (int i = 0; i < n; i++) {
             double mejor_dist = std::numeric_limits<double>::max();
@@ -138,9 +140,10 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
             }
         }
 
-        // ----------------------------------------
-        // PASO 2: Recalcular centroides - PARALELIZADO
-        // ----------------------------------------
+        // PASO 2: recalcular la posicion de cada centroide.
+        // Cada hilo acumula sus propias sumas locales para x, y, z
+        // y al final las junta en la seccion critica.
+        // Asi evitamos condiciones de carrera sin sacrificar rendimiento.
         std::vector<double> suma_x(K, 0.0);
         std::vector<double> suma_y(K, 0.0);
         std::vector<double> suma_z(K, 0.0);
@@ -148,6 +151,7 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
 
         #pragma omp parallel
         {
+            // cada hilo tiene su propia copia de las sumas, nadie interfiere
             std::vector<double> local_x(K, 0.0);
             std::vector<double> local_y(K, 0.0);
             std::vector<double> local_z(K, 0.0);
@@ -162,6 +166,7 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
                 local_conteo[k]++;
             }
 
+            // cada hilo aporta su parte al total, de uno en uno
             #pragma omp critical
             {
                 for (int k = 0; k < K; k++) {
@@ -173,6 +178,7 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
             }
         }
 
+        // con las sumas completas, movemos cada centroide a su nuevo lugar
         for (int k = 0; k < K; k++) {
             if (conteo[k] > 0) {
                 centroides[k].x = suma_x[k] / conteo[k];
@@ -185,9 +191,11 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
     return iter;
 }
 
-// ============================================================
-// MAIN
-// ============================================================
+// Punto de entrada. Recibe 4 argumentos:
+// 1. archivo CSV de entrada (x,y,z)
+// 2. K numero de clusters
+// 3. archivo CSV de salida
+// 4. numero de hilos OpenMP a usar
 int main(int argc, char* argv[]) {
 
     if (argc != 5) {

@@ -1,8 +1,6 @@
 # ============================================================
 # plot_results.py
 # Genera graficas de speedup y tiempos para el reporte
-# Computo Paralelo - ITAM 2026
-#
 # Uso: python plot_results.py
 # Debe correrse desde la carpeta raiz del proyecto (Kmeans_CPN/)
 # ============================================================

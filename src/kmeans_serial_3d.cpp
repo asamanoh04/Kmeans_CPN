@@ -1,9 +1,14 @@
-// ============================================================
 // K-MEANS SERIAL - 3D
 // Computo Paralelo - ITAM 2026
-// Uso: ./kmeans_serial_3d <archivo_entrada.csv> <K> <archivo_salida.csv>
-// Ejemplo: ./kmeans_serial_3d ../datos/100000_data_3d.csv 3 ../resultados/100000_salida_3d.csv
-// ============================================================
+//
+// Version base del K-means para datos en 3 dimensiones (x, y, z).
+// Sin paralelizacion, todo corre en un solo hilo de forma secuencial.
+// Es practicamente identico al serial 2D, solo que cada punto
+// ahora tiene una coordenada z adicional.
+//
+// Como se corre:
+// ./kmeans_serial_3d ../datos/100000_data_3d.csv 3 ../resultados/100000_salida_3d.csv
+//   archivo de entrada    K centroides    donde guardar los resultados
 
 #include <iostream>
 #include <fstream>
@@ -15,25 +20,20 @@
 #include <limits>
 #include <chrono>
 
-// ============================================================
-// ESTRUCTURA: Un punto en 3D
-// ============================================================
+// Un punto en 3D con sus tres coordenadas y su cluster asignado.
+// La unica diferencia vs 2D es que ahora tiene z tambien.
 struct Punto3D {
-    double x, y, z;  // ← única diferencia vs 2D: agrega z
+    double x, y, z;
     int cluster;
 };
 
-// ============================================================
-// ESTRUCTURA: Un centroide en 3D
-// ============================================================
+// Un centroide en 3D, solo coordenadas.
 struct Centroide3D {
-    double x, y, z;  // ← única diferencia vs 2D: agrega z
+    double x, y, z;
 };
 
-// ============================================================
-// FUNCIÓN: Leer CSV de entrada
-// Formato esperado: x,y,z (sin encabezado)
-// ============================================================
+// Lee el CSV linea por linea esperando tres valores por fila: x, y, z.
+// Sin encabezado, directo los numeros desde la primera linea.
 std::vector<Punto3D> leerCSV(const std::string& archivo) {
     std::vector<Punto3D> puntos;
     std::ifstream f(archivo);
@@ -53,7 +53,7 @@ std::vector<Punto3D> leerCSV(const std::string& archivo) {
 
         std::getline(ss, val, ','); p.x = std::stod(val);
         std::getline(ss, val, ','); p.y = std::stod(val);
-        std::getline(ss, val, ','); p.z = std::stod(val);  // ← lee z también
+        std::getline(ss, val, ','); p.z = std::stod(val);
 
         puntos.push_back(p);
     }
@@ -62,10 +62,8 @@ std::vector<Punto3D> leerCSV(const std::string& archivo) {
     return puntos;
 }
 
-// ============================================================
-// FUNCIÓN: Guardar CSV de salida
-// Formato: x,y,z,cluster
-// ============================================================
+// Guarda los resultados en CSV con cuatro columnas: x, y, z, cluster.
+// Se puede abrir en Python para graficar los clusters en 3D.
 void guardarCSV(const std::string& archivo, const std::vector<Punto3D>& puntos) {
     std::ofstream f(archivo);
 
@@ -74,7 +72,7 @@ void guardarCSV(const std::string& archivo, const std::vector<Punto3D>& puntos) 
         exit(1);
     }
 
-    f << "x,y,z,cluster\n";  // ← encabezado con z
+    f << "x,y,z,cluster\n";
     for (const auto& p : puntos) {
         f << p.x << "," << p.y << "," << p.z << "," << p.cluster << "\n";
     }
@@ -82,20 +80,18 @@ void guardarCSV(const std::string& archivo, const std::vector<Punto3D>& puntos) 
     f.close();
 }
 
-// ============================================================
-// FUNCIÓN: Distancia euclidiana al cuadrado entre punto y centroide
-// En 3D: dx² + dy² + dz²
-// ============================================================
+// Distancia euclidiana al cuadrado en 3D: dx^2 + dy^2 + dz^2.
+// Sin raiz cuadrada porque solo comparamos distancias entre si,
+// no necesitamos el valor exacto.
 double distancia2(const Punto3D& p, const Centroide3D& c) {
     double dx = p.x - c.x;
     double dy = p.y - c.y;
-    double dz = p.z - c.z;  // ← agrega dz
+    double dz = p.z - c.z;
     return dx*dx + dy*dy + dz*dz;
 }
 
-// ============================================================
-// FUNCIÓN: Inicializar centroides aleatoriamente
-// ============================================================
+// Elige K puntos al azar del dataset como centroides de arranque.
+// srand(42) para reproducibilidad: siempre los mismos centroides iniciales.
 std::vector<Centroide3D> inicializarCentroides(const std::vector<Punto3D>& puntos, int K) {
     std::vector<Centroide3D> centroides(K);
     int n = puntos.size();
@@ -106,15 +102,16 @@ std::vector<Centroide3D> inicializarCentroides(const std::vector<Punto3D>& punto
         int idx = rand() % n;
         centroides[k].x = puntos[idx].x;
         centroides[k].y = puntos[idx].y;
-        centroides[k].z = puntos[idx].z;  // ← inicializa z también
+        centroides[k].z = puntos[idx].z;
     }
 
     return centroides;
 }
 
-// ============================================================
-// FUNCIÓN PRINCIPAL: Algoritmo K-means SERIAL 3D
-// ============================================================
+// El algoritmo K-means serial en 3D. Todo secuencial, punto por punto.
+// Alterna entre asignar puntos y mover centroides hasta que nada cambie
+// o se llegue al limite de 100 iteraciones.
+// Regresa cuantas iteraciones tomo converger.
 int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, int K, int max_iter = 100) {
     int n = puntos.size();
     int iter = 0;
@@ -124,9 +121,8 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
         cambio = false;
         iter++;
 
-        // ----------------------------------------
-        // PASO 1: Asignar cada punto al centroide más cercano
-        // ----------------------------------------
+        // PASO 1: cada punto se va con el centroide mas cercano.
+        // Si algun punto cambia de cluster, seguimos iterando.
         for (int i = 0; i < n; i++) {
             double mejor_dist = std::numeric_limits<double>::max();
             int mejor_cluster = 0;
@@ -145,19 +141,18 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
             }
         }
 
-        // ----------------------------------------
-        // PASO 2: Recalcular posición de cada centroide
-        // ----------------------------------------
+        // PASO 2: cada centroide se mueve al promedio de sus puntos.
+        // Ahora acumulamos sumas para x, y, z por separado.
         std::vector<double> suma_x(K, 0.0);
         std::vector<double> suma_y(K, 0.0);
-        std::vector<double> suma_z(K, 0.0);  // ← agrega suma_z
+        std::vector<double> suma_z(K, 0.0);
         std::vector<int> conteo(K, 0);
 
         for (int i = 0; i < n; i++) {
             int k = puntos[i].cluster;
             suma_x[k] += puntos[i].x;
             suma_y[k] += puntos[i].y;
-            suma_z[k] += puntos[i].z;  // ← acumula z
+            suma_z[k] += puntos[i].z;
             conteo[k]++;
         }
 
@@ -165,7 +160,7 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
             if (conteo[k] > 0) {
                 centroides[k].x = suma_x[k] / conteo[k];
                 centroides[k].y = suma_y[k] / conteo[k];
-                centroides[k].z = suma_z[k] / conteo[k];  // ← actualiza z
+                centroides[k].z = suma_z[k] / conteo[k];
             }
         }
     }
@@ -173,9 +168,10 @@ int kmeans(std::vector<Punto3D>& puntos, std::vector<Centroide3D>& centroides, i
     return iter;
 }
 
-// ============================================================
-// MAIN
-// ============================================================
+// Punto de entrada. Recibe 3 argumentos:
+// 1. archivo CSV de entrada (x,y,z)
+// 2. K numero de clusters
+// 3. archivo CSV de salida
 int main(int argc, char* argv[]) {
 
     if (argc != 4) {

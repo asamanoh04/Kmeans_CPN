@@ -1,8 +1,6 @@
 # ============================================================
 # run_experimentos.py
 # Corre todos los experimentos de K-means y guarda los tiempos
-# Computo Paralelo - ITAM 2026
-#
 # Uso: python run_experimentos.py
 # Debe correrse desde la carpeta raiz del proyecto (Kmeans_CPN/)
 # ============================================================

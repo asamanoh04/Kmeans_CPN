@@ -1,9 +1,13 @@
-// ============================================================
 // K-MEANS SERIAL - 2D
 // Computo Paralelo - ITAM 2026
-// Uso: ./kmeans_serial_2d <archivo_entrada.csv> <K> <archivo_salida.csv>
-// Ejemplo: ./kmeans_serial_2d ../datos/100000_data_2d.csv 3 ../resultados/100000_salida_2d.csv
-// ============================================================
+//
+// Esta es la version base del K-means, sin paralelizacion.
+// Sirve como punto de comparacion para medir el speedup
+// que obtenemos con la version paralela.
+//
+// Como se corre:
+// ./kmeans_serial_2d ../datos/100000_data_2d.csv 3 ../resultados/100000_salida_2d.csv
+//   archivo de entrada    K centroides    donde guardar los resultados
 
 #include <iostream>
 #include <fstream>
@@ -15,25 +19,21 @@
 #include <limits>
 #include <chrono>
 
-// ============================================================
-// ESTRUCTURA: Un punto en 2D
-// ============================================================
+// Un punto en 2D con sus coordenadas y el cluster al que pertenece.
+// cluster empieza en -1 porque al inicio ningun punto tiene cluster asignado.
 struct Punto2D {
     double x, y;
-    int cluster; // A qué cluster pertenece este punto
+    int cluster;
 };
 
-// ============================================================
-// ESTRUCTURA: Un centroide en 2D
-// ============================================================
+// Un centroide en 2D, solo necesita coordenadas.
 struct Centroide2D {
     double x, y;
 };
 
-// ============================================================
-// FUNCIÓN: Leer CSV de entrada
-// Formato esperado: x,y (sin encabezado)
-// ============================================================
+// Lee el CSV de entrada linea por linea.
+// Espera dos valores por fila separados por coma: x, y.
+// Sin encabezado, directo los numeros.
 std::vector<Punto2D> leerCSV(const std::string& archivo) {
     std::vector<Punto2D> puntos;
     std::ifstream f(archivo);
@@ -61,10 +61,8 @@ std::vector<Punto2D> leerCSV(const std::string& archivo) {
     return puntos;
 }
 
-// ============================================================
-// FUNCIÓN: Guardar CSV de salida
-// Formato: x,y,cluster
-// ============================================================
+// Guarda los resultados en un CSV con tres columnas: x, y, cluster.
+// Ese archivo se puede abrir en Python para visualizar los clusters con colores.
 void guardarCSV(const std::string& archivo, const std::vector<Punto2D>& puntos) {
     std::ofstream f(archivo);
 
@@ -81,26 +79,23 @@ void guardarCSV(const std::string& archivo, const std::vector<Punto2D>& puntos) 
     f.close();
 }
 
-// ============================================================
-// FUNCIÓN: Distancia euclidiana al cuadrado entre punto y centroide
-// (No usamos raíz cuadrada para ahorrar cómputo — solo necesitamos comparar distancias)
-// ============================================================
+// Calcula la distancia euclidiana al cuadrado entre un punto y un centroide.
+// No usamos raiz cuadrada porque solo necesitamos comparar distancias entre si,
+// no el valor exacto. Esto nos ahorra millones de operaciones costosas.
 double distancia2(const Punto2D& p, const Centroide2D& c) {
     double dx = p.x - c.x;
     double dy = p.y - c.y;
     return dx*dx + dy*dy;
 }
 
-// ============================================================
-// FUNCIÓN: Inicializar centroides aleatoriamente
-// Toma K puntos aleatorios del dataset como centroides iniciales
-// ============================================================
+// Elige K puntos al azar del dataset como centroides iniciales.
+// srand(42) fija la semilla para que siempre arranquen en el mismo lugar
+// y los resultados sean reproducibles entre corridas.
 std::vector<Centroide2D> inicializarCentroides(const std::vector<Punto2D>& puntos, int K) {
     std::vector<Centroide2D> centroides(K);
     int n = puntos.size();
 
-    // Semilla aleatoria
-    srand(42); // Fija la semilla para reproducibilidad
+    srand(42);
 
     for (int k = 0; k < K; k++) {
         int idx = rand() % n;
@@ -111,10 +106,11 @@ std::vector<Centroide2D> inicializarCentroides(const std::vector<Punto2D>& punto
     return centroides;
 }
 
-// ============================================================
-// FUNCIÓN PRINCIPAL: Algoritmo K-means SERIAL
-// Devuelve el número de iteraciones que tomó converger
-// ============================================================
+// El algoritmo K-means serial. Todo en un solo hilo, punto por punto.
+// Repite dos pasos hasta converger o llegar al maximo de iteraciones:
+//   1. Asignar cada punto al centroide mas cercano
+//   2. Mover cada centroide al promedio de sus puntos
+// Regresa cuantas iteraciones tomo converger.
 int kmeans(std::vector<Punto2D>& puntos, std::vector<Centroide2D>& centroides, int K, int max_iter = 100) {
     int n = puntos.size();
     int iter = 0;
@@ -124,9 +120,8 @@ int kmeans(std::vector<Punto2D>& puntos, std::vector<Centroide2D>& centroides, i
         cambio = false;
         iter++;
 
-        // ----------------------------------------
-        // PASO 1: Asignar cada punto al centroide más cercano
-        // ----------------------------------------
+        // PASO 1: cada punto se va con el centroide mas cercano.
+        // Si algun punto cambia de cluster, seguimos iterando.
         for (int i = 0; i < n; i++) {
             double mejor_dist = std::numeric_limits<double>::max();
             int mejor_cluster = 0;
@@ -139,17 +134,14 @@ int kmeans(std::vector<Punto2D>& puntos, std::vector<Centroide2D>& centroides, i
                 }
             }
 
-            // Si el cluster del punto cambió, registrar que hubo cambio
             if (puntos[i].cluster != mejor_cluster) {
                 puntos[i].cluster = mejor_cluster;
                 cambio = true;
             }
         }
 
-        // ----------------------------------------
-        // PASO 2: Recalcular posición de cada centroide
-        // Promedio de todos los puntos que le pertenecen
-        // ----------------------------------------
+        // PASO 2: cada centroide se mueve al promedio de sus puntos.
+        // Sumamos todas las coordenadas de cada cluster y dividimos entre cuantos son.
         std::vector<double> suma_x(K, 0.0);
         std::vector<double> suma_y(K, 0.0);
         std::vector<int> conteo(K, 0);
@@ -172,12 +164,12 @@ int kmeans(std::vector<Punto2D>& puntos, std::vector<Centroide2D>& centroides, i
     return iter;
 }
 
-// ============================================================
-// MAIN
-// ============================================================
+// Punto de entrada. Recibe 3 argumentos:
+// 1. archivo CSV de entrada
+// 2. K numero de clusters
+// 3. archivo CSV de salida
 int main(int argc, char* argv[]) {
 
-    // Validar argumentos
     if (argc != 4) {
         std::cerr << "Uso: " << argv[0] << " <entrada.csv> <K> <salida.csv>" << std::endl;
         std::cerr << "Ejemplo: ./kmeans_serial_2d ../datos/100000_data_2d.csv 3 ../resultados/100000_salida_2d.csv" << std::endl;
@@ -193,29 +185,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Leer datos
     std::cout << "Leyendo datos de: " << archivo_entrada << std::endl;
     std::vector<Punto2D> puntos = leerCSV(archivo_entrada);
-    std::cout << "Puntos leídos: " << puntos.size() << std::endl;
+    std::cout << "Puntos leidos: " << puntos.size() << std::endl;
     std::cout << "K (clusters): " << K << std::endl;
 
-    // Inicializar centroides
     std::vector<Centroide2D> centroides = inicializarCentroides(puntos, K);
 
-    // Medir tiempo de ejecución
     auto inicio = std::chrono::high_resolution_clock::now();
 
-    // Ejecutar K-means
     int iteraciones = kmeans(puntos, centroides, K);
 
     auto fin = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> tiempo = fin - inicio;
 
-    // Mostrar resultados
     std::cout << "Iteraciones: " << iteraciones << std::endl;
     std::cout << "Tiempo (segundos): " << tiempo.count() << std::endl;
 
-    // Guardar resultados
     guardarCSV(archivo_salida, puntos);
     std::cout << "Resultados guardados en: " << archivo_salida << std::endl;
 
